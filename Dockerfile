@@ -6,6 +6,7 @@ USER root
 
 ARG BUILDX_VERSION=0.35.0
 ARG DOCKER_VERSION=29.1.3
+ARG AWSCLI_VERSION=2.36.21
 ARG TARGETARCH
 
 # buildx as a CLI plugin, installed system-wide so the runner user picks it up
@@ -36,7 +37,32 @@ RUN set -eux; \
     install -o root -g root -m 0755 /tmp/docker/docker "${target}"; \
     rm -rf /tmp/docker.tgz /tmp/docker
 
+# AWS CLI v2. Installed to /usr/local so it is on the default PATH for the
+# runner user and for job steps (the base image ships no aws binary).
+# Set AWSCLI_VERSION to "latest" (or empty) to track the moving installer.
+RUN set -eux; \
+    case "${TARGETARCH:-amd64}" in \
+      amd64) awscli_arch=x86_64 ;; \
+      arm64) awscli_arch=aarch64 ;; \
+      *) echo "unsupported TARGETARCH=${TARGETARCH}" >&2; exit 1 ;; \
+    esac; \
+    case "${AWSCLI_VERSION:-}" in \
+      ""|latest) ver_suffix="" ;; \
+      *) ver_suffix="-${AWSCLI_VERSION}" ;; \
+    esac; \
+    if ! command -v unzip >/dev/null; then \
+      apt-get update; \
+      apt-get install -y --no-install-recommends unzip; \
+      rm -rf /var/lib/apt/lists/*; \
+    fi; \
+    url="https://awscli.amazonaws.com/awscli-exe-linux-${awscli_arch}${ver_suffix}.zip"; \
+    echo "installing aws cli from ${url}"; \
+    curl -fsSL "$url" -o /tmp/awscliv2.zip; \
+    unzip -q /tmp/awscliv2.zip -d /tmp; \
+    /tmp/aws/install --bin-dir /usr/local/bin --install-dir /usr/local/aws-cli --update; \
+    rm -rf /tmp/awscliv2.zip /tmp/aws
+
 USER runner
 
-# Fail the build if the plugin is not visible to the runner user
-RUN docker --version && docker buildx version
+# Fail the build if the tools are not visible to the runner user
+RUN docker --version && docker buildx version && aws --version

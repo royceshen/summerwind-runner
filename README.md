@@ -1,18 +1,20 @@
 # summerwind-runner
 
-`summerwind/actions-runner` with `docker buildx` embedded as a CLI plugin, plus a
-docker CLI bumped to match the dind sidecar version.
+`summerwind/actions-runner` plus the tooling ARC jobs assume is present:
 
-Why: the upstream summerwind runner image ships a docker CLI without the buildx
-plugin, so `docker buildx build` fails in ARC runner pods even when a dind
-sidecar is attached.
+| tool | why |
+| --- | --- |
+| `docker buildx` (CLI plugin) | upstream ships a docker CLI without it, so `docker buildx build` fails in runner pods even with a dind sidecar attached |
+| `docker` CLI, version-matched | keeps the client in step with the dind server |
+| `aws` CLI v2 | upstream ships no `aws` binary at all — job steps fail with `aws: command not found` (e.g. `aws ecr get-login-password`) |
 
 ## Image
 
 ```
-ghcr.io/royceshen/summerwind-runner:ubuntu-24.04
-ghcr.io/royceshen/summerwind-runner:ubuntu-24.04-buildx0.35.0-docker29.1.3
-ghcr.io/royceshen/summerwind-runner:latest
+ghcr.io/royceshen/summerwind-runner:ubuntu-24.04                                    # mutable
+ghcr.io/royceshen/summerwind-runner:ubuntu-24.04-buildx0.35.0-docker29.1.3-aws2.36.21
+ghcr.io/royceshen/summerwind-runner:sha-<short>                                     # immutable, pin this in ARC
+ghcr.io/royceshen/summerwind-runner:latest                                          # mutable
 ```
 
 Each tag is a single multi-arch manifest list covering `linux/amd64` and
@@ -33,6 +35,7 @@ run the `build-runner-image` workflow manually and override:
 | `runner_tag` | `ubuntu-24.04` |
 | `buildx_version` | `0.35.0` |
 | `docker_version` | `29.1.3` |
+| `awscli_version` | `2.36.21` (use `latest` to track the moving installer) |
 | `platforms` | `linux/amd64,linux/arm64` |
 
 The arm64 layers are built under QEMU on the amd64 hosted runner. That is cheap
@@ -52,6 +55,7 @@ docker buildx build \
   --platform linux/amd64,linux/arm64 \
   --build-arg BUILDX_VERSION=0.35.0 \
   --build-arg DOCKER_VERSION=29.1.3 \
+  --build-arg AWSCLI_VERSION=2.36.21 \
   -t summerwind-runner:local .
 ```
 
@@ -79,4 +83,14 @@ spec:
 
 `buildx` lands at `/usr/local/lib/docker/cli-plugins/docker-buildx`, which is a
 system-wide plugin path, so it resolves for the `runner` user without any
-`~/.docker` config.
+`~/.docker` config. `aws` lands at `/usr/local/bin/aws` (install dir
+`/usr/local/aws-cli`), on the default PATH for both the runner user and job
+steps.
+
+Installing the CLI does not give it credentials. For ECR access, attach an IAM
+role to the runner service account via IRSA (or Pod Identity) — the CLI picks up
+the projected token automatically:
+
+```yaml
+serviceAccountName: <sa-annotated-with-role-arn>
+```
