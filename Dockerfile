@@ -7,6 +7,7 @@ USER root
 ARG BUILDX_VERSION=0.35.0
 ARG DOCKER_VERSION=29.1.3
 ARG AWSCLI_VERSION=2.36.21
+ARG YQ_VERSION=4.53.3
 ARG TARGETARCH
 
 # buildx as a CLI plugin, installed system-wide so the runner user picks it up
@@ -62,7 +63,35 @@ RUN set -eux; \
     /tmp/aws/install --bin-dir /usr/local/bin --install-dir /usr/local/aws-cli --update; \
     rm -rf /tmp/awscliv2.zip /tmp/aws
 
+# yq (mikefarah/yq v4) — the CD jobs patch gitops values with `yq e "... = ..." -i`,
+# which is v4 syntax. Do NOT swap this for the apt `yq` (a python jq wrapper) or
+# for v3: both take different expression syntax and would break those steps.
+RUN set -eux; \
+    case "${TARGETARCH:-amd64}" in \
+      amd64) yq_arch=amd64 ;; \
+      arm64) yq_arch=arm64 ;; \
+      *) echo "unsupported TARGETARCH=${TARGETARCH}" >&2; exit 1 ;; \
+    esac; \
+    curl -fsSL "https://github.com/mikefarah/yq/releases/download/v${YQ_VERSION}/yq_linux_${yq_arch}" \
+      -o /usr/local/bin/yq; \
+    chmod 0755 /usr/local/bin/yq
+
+# jq is relied on by ad-hoc CI steps; guarantee it rather than trusting the base.
+RUN set -eux; \
+    if ! command -v jq >/dev/null; then \
+      apt-get update; \
+      apt-get install -y --no-install-recommends jq; \
+      rm -rf /var/lib/apt/lists/*; \
+    fi
+
 USER runner
 
-# Fail the build if the tools are not visible to the runner user
-RUN docker --version && docker buildx version && aws --version
+# Fail the build if any tool the CI/CD jobs call is not on the runner user's PATH.
+# node is deliberately absent: job steps get it from actions/setup-node, and the
+# runner's own node lives in /runner/externals, off the default PATH.
+RUN docker --version \
+ && docker buildx version \
+ && aws --version \
+ && yq --version \
+ && jq --version \
+ && git --version

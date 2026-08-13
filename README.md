@@ -6,13 +6,15 @@
 | --- | --- |
 | `docker buildx` (CLI plugin) | upstream ships a docker CLI without it, so `docker buildx build` fails in runner pods even with a dind sidecar attached |
 | `docker` CLI, version-matched | keeps the client in step with the dind server |
-| `aws` CLI v2 | upstream ships no `aws` binary at all — job steps fail with `aws: command not found` (e.g. `aws ecr get-login-password`) |
+| `aws` CLI v2 | upstream ships no `aws` binary at all — job steps fail with `aws: command not found` (e.g. `aws ecr get-login-password`, `aws s3 cp`) |
+| `yq` v4 (mikefarah) | CD jobs patch gitops values with `yq e '.image.tag = "..."' -i`, which is v4 syntax |
+| `jq` | relied on by ad-hoc CI steps; installed explicitly rather than assumed from the base |
 
 ## Image
 
 ```
 ghcr.io/royceshen/summerwind-runner:ubuntu-24.04                                    # mutable
-ghcr.io/royceshen/summerwind-runner:ubuntu-24.04-buildx0.35.0-docker29.1.3-aws2.36.21
+ghcr.io/royceshen/summerwind-runner:ubuntu-24.04-buildx0.35.0-docker29.1.3-aws2.36.21-yq4.53.3
 ghcr.io/royceshen/summerwind-runner:sha-<short>                                     # immutable, pin this in ARC
 ghcr.io/royceshen/summerwind-runner:latest                                          # mutable
 ```
@@ -36,6 +38,7 @@ run the `build-runner-image` workflow manually and override:
 | `buildx_version` | `0.35.0` |
 | `docker_version` | `29.1.3` |
 | `awscli_version` | `2.36.21` (use `latest` to track the moving installer) |
+| `yq_version` | `4.53.3` |
 | `platforms` | `linux/amd64,linux/arm64` |
 
 The arm64 layers are built under QEMU on the amd64 hosted runner. That is cheap
@@ -56,6 +59,7 @@ docker buildx build \
   --build-arg BUILDX_VERSION=0.35.0 \
   --build-arg DOCKER_VERSION=29.1.3 \
   --build-arg AWSCLI_VERSION=2.36.21 \
+  --build-arg YQ_VERSION=4.53.3 \
   -t summerwind-runner:local .
 ```
 
